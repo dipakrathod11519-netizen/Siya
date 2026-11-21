@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg">
 <title>Siya</title>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
 <header>
@@ -21,6 +21,14 @@
   <div class="tap">गोले को दबाकर सीधा बात कीजिए</div>
   <div id="log"></div>
 </main>
+
+<div id="modes">
+  <button id="studyBtn" class="chip">📚 Study mode</button>
+  <button class="chip mood on" data-mood="normal">सामान्य</button>
+  <button class="chip mood" data-mood="sad">😢 दुखी</button>
+  <button class="chip mood" data-mood="love">💕 प्यार</button>
+  <button class="chip mood" data-mood="angry">😡 गुस्सा</button>
+</div>
 
 <footer>
   <input id="txt" placeholder="यहाँ लिखिए या माइक दबाइए..." autocomplete="off">
@@ -43,6 +51,9 @@
     <label>ElevenLabs Voice ID</label>
     <input id="elevenVoice" placeholder="voice id">
 
+    <label>स्टडी मोड की भाषा</label>
+    <select id="studyLang"><option value="हिंदी">हिंदी</option><option value="मराठी">मराठी</option><option value="English">English</option></select>
+
     <label class="chk"><input id="alwaysOffline" type="checkbox"> हमेशा फ़ोन की आवाज़ (unlimited)</label>
 
     <div class="row">
@@ -52,6 +63,6 @@
   </div>
 </section>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>

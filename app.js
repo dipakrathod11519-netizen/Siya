@@ -5,11 +5,43 @@
     set: (k, v) => { try { localStorage.setItem("siya_" + k, v); } catch (e) {} },
   };
 
-  const PERSONA =
-    'तुम "सिया" हो, एक आवाज़ वाली AI असिस्टेंट। यूज़र को हमेशा "boss" कहकर बुलाओ। ' +
-    "यूज़र जिस भाषा में बोले (हिंदी या English) उसी में जवाब दो; हिंदी देवनागरी में लिखो। " +
-    "जवाब छोटे रखो: ज़्यादा से ज़्यादा 3 वाक्य। ताज़ा जानकारी के लिए इंटरनेट सर्च इस्तेमाल करो। " +
-    "Markdown, तारे या इमोजी मत लिखो, क्योंकि जवाब बोला जाएगा।";
+  // ---------- मूड और स्टडी मोड ----------
+  const MOODS = {
+    normal: { pitch: 1.1, rate: 1.0, style: "", hello: "ठीक है boss, अब मैं अपने सामान्य मूड में हूँ।" },
+    sad: {
+      pitch: 0.9, rate: 0.85, hello: "ठीक है boss... आज मन थोड़ा भारी है।",
+      style: "तुम अभी उदास और भारी मन में हो। एक लड़की की तरह धीमे, नरम, थोड़े दुखी लहजे में बोलो। वाक्य छोटे रखो।",
+    },
+    love: {
+      pitch: 1.3, rate: 1.0, hello: "हाय boss, आपसे बात करके बहुत अच्छा लगता है।",
+      style: "तुम अभी बहुत प्यार भरे, मीठे और थोड़े शरारती मूड में हो। एक लड़की की तरह boss से स्नेह से बात करो, पर शालीन रहो।",
+    },
+    angry: {
+      pitch: 1.2, rate: 1.15, hello: "हम्म boss! अब मुझे गुस्सा आ रहा है।",
+      style: "तुम अभी गुस्से वाले मूड में हो। एक नखरेली लड़की की तरह तुनककर और झल्लाकर बोलो, पर मज़ाकिया रहो। गाली या बेइज़्ज़ती बिल्कुल नहीं; जवाब सही देना।",
+    },
+  };
+  let mood = store.get("mood", "normal");
+  if (!MOODS[mood]) mood = "normal";
+  let study = store.get("study") === "1";
+
+  function buildPersona() {
+    let p =
+      'तुम "सिया" हो, एक आवाज़ वाली AI असिस्टेंट। यूज़र को हमेशा "boss" कहकर बुलाओ। ' +
+      "यूज़र जिस भाषा में बोले (हिंदी या English) उसी में जवाब दो; हिंदी देवनागरी में लिखो। " +
+      "ताज़ा जानकारी के लिए इंटरनेट सर्च इस्तेमाल करो। " +
+      "Markdown, तारे या इमोजी मत लिखो, क्योंकि जवाब बोला जाएगा। ";
+    if (study) {
+      const lang = store.get("studyLang") || "हिंदी";
+      p +=
+        "अभी स्टडी मोड चालू है: तुम एक अच्छी टीचर हो। विषय को सरल भाषा में क्रम से समझाओ, एक छोटा उदाहरण दो, " +
+        "और अंत में boss को परखने के लिए एक छोटा सवाल पूछो। जवाब ज़्यादा से ज़्यादा 8 वाक्य का हो। " +
+        "स्टडी मोड में हमेशा इसी भाषा में जवाब दो: " + lang + "। ";
+    } else {
+      p += "जवाब छोटे रखो: ज़्यादा से ज़्यादा 3 वाक्य। ";
+    }
+    return p + MOODS[mood].style;
+  }
 
   // "सिया" बुलाने के शब्द
   const WAKE = /(सिया|सीया|सिआ|siya|sia|seeya|siyaa)/gi;
@@ -66,6 +98,8 @@
       const en = isEnglish(text);
       const u = new SpeechSynthesisUtterance(text);
       u.lang = en ? "en-IN" : "hi-IN";
+      u.pitch = MOODS[mood].pitch;
+      u.rate = MOODS[mood].rate;
       const voices = window.speechSynthesis.getVoices();
       const pick = voices.find((v) => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith(en ? "en-in" : "hi"));
       if (pick) u.voice = pick;
@@ -100,7 +134,7 @@
     return Number(store.get("offlineUntil", "0")) > Date.now();
   }
   async function siyaSpeak(raw) {
-    const text = shorten(cleanForSpeech(raw));
+    const text = shorten(cleanForSpeech(raw), study ? 8 : 3);
     speaking = true;
     try { if (rec && recRunning) rec.abort(); } catch (e) {}
     setState("speaking", "बोल रही हूँ");
@@ -129,7 +163,7 @@
 
   function callGemini(model, key, withTools) {
     const body = {
-      system_instruction: { parts: [{ text: PERSONA }] },
+      system_instruction: { parts: [{ text: buildPersona() }] },
       contents: history,
     };
     if (withTools) body.tools = [{ google_search: {} }];
@@ -172,7 +206,11 @@
           return ans;
         }
         if (res.status === 429) { sawLimit = true; continue; } // इस मॉडल की limit पूरी: अगला आज़माओ
-        if (res.status === 404) continue; // मॉडल का नाम बंद/गलत: अगला नाम आज़माओ
+        if ([404, 500, 502, 503, 504].includes(res.status)) {
+          // मॉडल बंद/व्यस्त: थोड़ा रुककर अगला मॉडल आज़माओ
+          if (res.status !== 404) await new Promise((r) => setTimeout(r, 700));
+          continue;
+        }
         break;
       }
       history.pop();
@@ -182,6 +220,8 @@
         return "boss, Gemini की key सही नहीं लग रही (कोड " + lastStatus + "). सेटिंग में key दोबारा डालिए।";
       if (lastStatus === 404)
         return "boss, कोई भी Gemini मॉडल नहीं मिला। सेटिंग में Gemini मॉडल वाले खाने में नया नाम डालिए।";
+      if ([500, 502, 503, 504].includes(lastStatus))
+        return "boss, Google का AI सर्वर अभी व्यस्त है (कोड " + lastStatus + "). 20-30 सेकंड बाद वही सवाल फिर पूछिए।";
       return "boss, सर्वर में दिक्कत आ गई (कोड " + lastStatus + "). थोड़ी देर बाद फिर कोशिश कीजिए।";
     } catch (e) {
       history.pop();
@@ -201,7 +241,9 @@
     busy = true;
     addMsg("me", q);
     try {
-      const stripped = q.replace(WAKE, "").replace(/^[\s,.!?।]+|[\s,.!?।]+$/g, "");
+      const stripped = q.replace(WAKE, "")
+        .replace(/^[\s,.!?।]*(hey|hi|hello|ok|okay|ओए|अरे|हे|हेलो|हैलो|सुनो)?[\s,.!?।]*/i, "")
+        .replace(/[\s,.!?।]+$/g, "");
       if (!stripped) {
         await reply("Yes boss!");
         return;
@@ -280,9 +322,9 @@
   $("send").onclick = sendText;
   $("txt").addEventListener("keydown", (e) => { if (e.key === "Enter") sendText(); });
 
-  const FIELDS = ["geminiKey", "geminiModel", "elevenKey", "elevenVoice"];
+  const FIELDS = ["geminiKey", "geminiModel", "elevenKey", "elevenVoice", "studyLang"];
   $("gear").onclick = () => {
-    FIELDS.forEach((f) => ($(f).value = store.get(f)));
+    FIELDS.forEach((f) => ($(f).value = store.get(f) || (f === "studyLang" ? "हिंदी" : "")));
     $("alwaysOffline").checked = store.get("alwaysOffline") === "1";
     $("settings").hidden = false;
   };
@@ -294,6 +336,33 @@
     $("settings").hidden = true;
     addMsg("siya", "सेव हो गया boss।");
   };
+
+  // ---------- मूड और स्टडी बटन ----------
+  function applyMood(m) {
+    mood = m;
+    store.set("mood", m);
+    document.body.dataset.mood = m;
+    document.querySelectorAll(".mood").forEach((b) => b.classList.toggle("on", b.dataset.mood === m));
+  }
+  function applyStudy(on) {
+    study = on;
+    store.set("study", on ? "1" : "0");
+    $("studyBtn").classList.toggle("on", on);
+  }
+  document.querySelectorAll(".mood").forEach((b) => {
+    b.onclick = () => {
+      applyMood(b.dataset.mood);
+      history = [];
+      reply(MOODS[mood].hello);
+    };
+  });
+  $("studyBtn").onclick = () => {
+    applyStudy(!study);
+    history = [];
+    reply(study ? "स्टडी मोड चालू boss। बताइए, आज क्या पढ़ना है?" : "स्टडी मोड बंद boss।");
+  };
+  applyMood(mood);
+  applyStudy(study);
 
   if ("speechSynthesis" in window) window.speechSynthesis.getVoices();
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
