@@ -124,36 +124,65 @@
   }
 
   // ---------- AI से जवाब (लाइव इंटरनेट के साथ) ----------
+  // Google के मॉडल समय-समय पर बदलते/बंद होते हैं, इसलिए कई नाम बारी-बारी आज़माते हैं
+  const MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-flash-latest"];
+
+  function callGemini(model, key, withTools) {
+    const body = {
+      system_instruction: { parts: [{ text: PERSONA }] },
+      contents: history,
+    };
+    if (withTools) body.tools = [{ google_search: {} }];
+    return fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
   async function askAI(q) {
     const key = store.get("geminiKey");
     if (!key) return "boss, पहले सेटिंग में Gemini की key डालिए, फिर मैं लाइव जवाब दे पाऊँगी।";
-    const model = store.get("geminiModel") || "gemini-2.0-flash";
     history.push({ role: "user", parts: [{ text: q }] });
     history = history.slice(-8);
+    const candidates = [store.get("geminiModel"), store.get("workingModel"), ...MODELS].filter(
+      (m, i, a) => m && a.indexOf(m) === i
+    );
+    let lastStatus = 0;
     try {
-      const res = await fetch(
-        "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
-          body: JSON.stringify({
-            system_instruction: { parts: [{ text: PERSONA }] },
-            contents: history,
-            tools: [{ google_search: {} }],
-          }),
+      for (const model of candidates) {
+        let res = await callGemini(model, key, true);
+        if (!res.ok && (res.status === 400 || res.status === 403)) {
+          // हो सकता है इस key पर सर्च वाला हिस्सा बंद हो: बिना सर्च के फिर कोशिश
+          const res2 = await callGemini(model, key, false);
+          if (res2.ok) res = res2;
         }
-      );
-      if (!res.ok) {
-        history.pop();
-        if (res.status === 429) return "boss, AI की आज की limit पूरी हो गई है। थोड़ी देर बाद फिर पूछिए।";
-        if (res.status === 400 || res.status === 403) return "boss, Gemini की key या मॉडल का नाम सही नहीं लग रहा। सेटिंग जाँच लीजिए।";
-        return "boss, इंटरनेट या सर्वर में दिक्कत आ गई। फिर से कोशिश कीजिए।";
+        lastStatus = res.status;
+        if (res.ok) {
+          const data = await res.json();
+          const parts =
+            (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+          const ans = parts.map((p) => p.text || "").join("").trim() || "boss, मुझे इसका जवाब नहीं मिला।";
+          store.set("workingModel", model);
+          history.push({ role: "model", parts: [{ text: ans }] });
+          return ans;
+        }
+        if (res.status === 429) {
+          history.pop();
+          return "boss, AI की limit अभी पूरी हो गई है। थोड़ी देर बाद फिर पूछिए।";
+        }
+        if (res.status === 404) continue; // मॉडल का नाम बंद/गलत: अगला नाम आज़माओ
+        break;
       }
-      const data = await res.json();
-      const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
-      const ans = parts.map((p) => p.text || "").join("").trim() || "boss, मुझे इसका जवाब नहीं मिला।";
-      history.push({ role: "model", parts: [{ text: ans }] });
-      return ans;
+      history.pop();
+      if ([400, 401, 403].includes(lastStatus))
+        return "boss, Gemini की key सही नहीं लग रही (कोड " + lastStatus + "). सेटिंग में key दोबारा डालिए।";
+      if (lastStatus === 404)
+        return "boss, कोई भी Gemini मॉडल नहीं मिला। सेटिंग में Gemini मॉडल वाले खाने में नया नाम डालिए।";
+      return "boss, सर्वर में दिक्कत आ गई (कोड " + lastStatus + "). थोड़ी देर बाद फिर कोशिश कीजिए।";
     } catch (e) {
       history.pop();
       return "boss, इंटरनेट नहीं चल रहा लगता। कनेक्शन देख लीजिए।";

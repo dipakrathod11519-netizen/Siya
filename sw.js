@@ -1,4 +1,4 @@
-const CACHE = "siya-v2";
+const CACHE = "siya-v3";
 const FILES = ["./", "./index.html", "./style.css", "./app.js", "./manifest.json", "./icon.svg"];
 
 self.addEventListener("install", (e) => {
