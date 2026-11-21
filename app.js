@@ -1,0 +1,272 @@
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const store = {
+    get: (k, d = "") => { try { const v = localStorage.getItem("siya_" + k); return v === null ? d : v; } catch (e) { return d; } },
+    set: (k, v) => { try { localStorage.setItem("siya_" + k, v); } catch (e) {} },
+  };
+
+  const PERSONA =
+    'तुम "सिया" हो, एक आवाज़ वाली AI असिस्टेंट। यूज़र को हमेशा "boss" कहकर बुलाओ। ' +
+    "यूज़र जिस भाषा में बोले (हिंदी या English) उसी में जवाब दो; हिंदी देवनागरी में लिखो। " +
+    "जवाब छोटे रखो: ज़्यादा से ज़्यादा 3 वाक्य। ताज़ा जानकारी के लिए इंटरनेट सर्च इस्तेमाल करो। " +
+    "Markdown, तारे या इमोजी मत लिखो, क्योंकि जवाब बोला जाएगा।";
+
+  // "सिया" बुलाने के शब्द
+  const WAKE = /(सिया|सीया|सिआ|siya|sia|seeya|siyaa)/gi;
+  const PHONEPE = /(phonepe|phone pe|फोनपे|फ़ोनपे|फोन पे)/i;
+
+  // ऐप खोलने की सूची (PhonePe जानबूझकर नहीं है)
+  const APPS = [
+    { name: "WhatsApp", pkg: "com.whatsapp", re: /(whatsapp|व्हाट्सएप|वाट्सएप|व्हाट्सऐप|वॉट्सऐप)/i },
+    { name: "YouTube", pkg: "com.google.android.youtube", re: /(youtube|यूट्यूब|यू ट्यूब)/i },
+    { name: "Instagram", pkg: "com.instagram.android", re: /(instagram|इंस्टाग्राम|इन्स्टाग्राम)/i },
+    { name: "Google Maps", pkg: "com.google.android.apps.maps", re: /(maps|मैप्स|गूगल मैप|नक्शा)/i },
+    { name: "Telegram", pkg: "org.telegram.messenger", re: /(telegram|टेलीग्राम)/i },
+    { name: "Facebook", pkg: "com.facebook.katana", re: /(facebook|फेसबुक)/i },
+    { name: "Gmail", pkg: "com.google.android.gm", re: /(gmail|जीमेल)/i },
+    { name: "Chrome", pkg: "com.android.chrome", re: /(chrome|क्रोम)/i },
+  ];
+  const OPEN_WORDS = /(खोल|खोलो|open|चालू|लगाओ|start)/i;
+
+  let history = [];
+  let listening = false;
+  let speaking = false;
+  let busy = false;
+  let recRunning = false;
+  let rec = null;
+
+  function setState(cls, text) {
+    $("orb").className = "orb " + cls;
+    if (text) $("status").textContent = text;
+  }
+  function addMsg(who, text) {
+    const d = document.createElement("div");
+    d.className = "msg " + who;
+    d.textContent = text;
+    $("log").appendChild(d);
+    $("log").scrollTop = $("log").scrollHeight;
+  }
+
+  // ---------- आवाज़ बोलना: ElevenLabs, limit पर फ़ोन की आवाज़ ----------
+  function cleanForSpeech(t) {
+    return t.replace(/[*_#`>~]/g, "").replace(/\s+/g, " ").trim();
+  }
+  function shorten(text, n = 3) {
+    return text.split(/(?<=[।.!?])\s+/).slice(0, n).join(" ");
+  }
+  function isEnglish(t) {
+    const letters = t.replace(/[^A-Za-zऀ-ॿ]/g, "");
+    if (!letters) return false;
+    const latin = (letters.match(/[A-Za-z]/g) || []).length;
+    return latin / letters.length > 0.6;
+  }
+  function speakOffline(text) {
+    return new Promise((resolve) => {
+      if (!("speechSynthesis" in window)) return resolve();
+      const en = isEnglish(text);
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = en ? "en-IN" : "hi-IN";
+      const voices = window.speechSynthesis.getVoices();
+      const pick = voices.find((v) => v.lang && v.lang.toLowerCase().replace("_", "-").startsWith(en ? "en-in" : "hi"));
+      if (pick) u.voice = pick;
+      u.onend = resolve;
+      u.onerror = resolve;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(u);
+    });
+  }
+  async function speakEleven(text) {
+    const key = store.get("elevenKey");
+    const voice = store.get("elevenVoice");
+    const res = await fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(voice), {
+      method: "POST",
+      headers: { "xi-api-key": key, "Content-Type": "application/json", Accept: "audio/mpeg" },
+      body: JSON.stringify({ text, model_id: "eleven_multilingual_v2" }),
+    });
+    if (!res.ok) {
+      const err = new Error("eleven_error");
+      err.status = res.status;
+      throw err;
+    }
+    const blob = await res.blob();
+    const audio = new Audio(URL.createObjectURL(blob));
+    await new Promise((resolve, reject) => {
+      audio.onended = resolve;
+      audio.onerror = reject;
+      audio.play().catch(reject);
+    });
+  }
+  function elevenBlocked() {
+    return Number(store.get("offlineUntil", "0")) > Date.now();
+  }
+  async function siyaSpeak(raw) {
+    const text = shorten(cleanForSpeech(raw));
+    speaking = true;
+    try { if (rec && recRunning) rec.abort(); } catch (e) {}
+    setState("speaking", "बोल रही हूँ");
+    const useEleven =
+      store.get("alwaysOffline") !== "1" && store.get("elevenKey") && store.get("elevenVoice") && !elevenBlocked();
+    try {
+      if (useEleven) {
+        try {
+          await speakEleven(text);
+        } catch (e) {
+          // limit / quota / key की दिक्कत: 1 घंटे के लिए फ़ोन की आवाज़ पर
+          if ([401, 402, 429].includes(e.status)) store.set("offlineUntil", String(Date.now() + 3600000));
+          await speakOffline(text);
+        }
+      } else {
+        await speakOffline(text);
+      }
+    } finally {
+      speaking = false;
+    }
+  }
+
+  // ---------- AI से जवाब (लाइव इंटरनेट के साथ) ----------
+  async function askAI(q) {
+    const key = store.get("geminiKey");
+    if (!key) return "boss, पहले सेटिंग में Gemini की key डालिए, फिर मैं लाइव जवाब दे पाऊँगी।";
+    const model = store.get("geminiModel") || "gemini-2.0-flash";
+    history.push({ role: "user", parts: [{ text: q }] });
+    history = history.slice(-8);
+    try {
+      const res = await fetch(
+        "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+          body: JSON.stringify({
+            system_instruction: { parts: [{ text: PERSONA }] },
+            contents: history,
+            tools: [{ google_search: {} }],
+          }),
+        }
+      );
+      if (!res.ok) {
+        history.pop();
+        if (res.status === 429) return "boss, AI की आज की limit पूरी हो गई है। थोड़ी देर बाद फिर पूछिए।";
+        if (res.status === 400 || res.status === 403) return "boss, Gemini की key या मॉडल का नाम सही नहीं लग रहा। सेटिंग जाँच लीजिए।";
+        return "boss, इंटरनेट या सर्वर में दिक्कत आ गई। फिर से कोशिश कीजिए।";
+      }
+      const data = await res.json();
+      const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+      const ans = parts.map((p) => p.text || "").join("").trim() || "boss, मुझे इसका जवाब नहीं मिला।";
+      history.push({ role: "model", parts: [{ text: ans }] });
+      return ans;
+    } catch (e) {
+      history.pop();
+      return "boss, इंटरनेट नहीं चल रहा लगता। कनेक्शन देख लीजिए।";
+    }
+  }
+
+  // ---------- कमांड संभालना ----------
+  async function reply(t) {
+    addMsg("siya", t);
+    await siyaSpeak(t);
+    setState(listening ? "listening" : "idle", listening ? "सुन रही हूँ" : "तैयार");
+  }
+  async function handle(raw) {
+    const q = (raw || "").trim();
+    if (!q || busy) return;
+    busy = true;
+    addMsg("me", q);
+    try {
+      const stripped = q.replace(WAKE, "").replace(/^[\s,.!?।]+|[\s,.!?।]+$/g, "");
+      if (!stripped) {
+        await reply("Yes boss!");
+        return;
+      }
+      if (PHONEPE.test(q)) {
+        await reply("boss, PhonePe मैं नहीं जोड़ती, जैसा आपने कहा था।");
+        return;
+      }
+      if (OPEN_WORDS.test(stripped)) {
+        const app = APPS.find((a) => a.re.test(stripped));
+        if (app) {
+          await reply("ठीक है boss, " + app.name + " खोल रही हूँ।");
+          location.href = "intent://#Intent;package=" + app.pkg + ";end";
+          return;
+        }
+      }
+      setState("thinking", "सोच रही हूँ...");
+      const ans = await askAI(stripped);
+      await reply(ans);
+    } finally {
+      busy = false;
+      if (listening) loop();
+    }
+  }
+
+  // ---------- माइक से सुनना ----------
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  function loop() {
+    if (!listening || speaking || busy || recRunning || !SR) return;
+    rec = new SR();
+    rec.lang = "hi-IN";
+    rec.interimResults = false;
+    rec.continuous = false;
+    rec.onstart = () => { recRunning = true; setState("listening", "सुन रही हूँ"); };
+    rec.onresult = (e) => handle(e.results[0][0].transcript);
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        stopListening();
+        addMsg("siya", "boss, माइक की अनुमति नहीं मिली। ब्राउज़र की सेटिंग में माइक चालू कीजिए।");
+      }
+    };
+    rec.onend = () => {
+      recRunning = false;
+      if (listening && !speaking && !busy) setTimeout(loop, 250);
+    };
+    try { rec.start(); } catch (e) { recRunning = false; }
+  }
+  function startListening() {
+    if (!SR) {
+      addMsg("siya", "boss, इस ब्राउज़र में आवाज़ पहचानना नहीं है। Android के Chrome में खोलिए।");
+      return;
+    }
+    listening = true;
+    $("mic").classList.add("on");
+    loop();
+  }
+  function stopListening() {
+    listening = false;
+    $("mic").classList.remove("on");
+    try { if (rec) rec.abort(); } catch (e) {}
+    setState("idle", "तैयार");
+  }
+
+  // ---------- बटन और सेटिंग ----------
+  const toggleMic = () => {
+    if (speaking) {
+      // बोलते समय दबाने पर चुप हो जाएगी
+      try { window.speechSynthesis.cancel(); } catch (e) {}
+      return;
+    }
+    listening ? stopListening() : startListening();
+  };
+  $("mic").onclick = toggleMic;
+  $("orb").onclick = toggleMic; // चमकते गोले को दबाकर सीधा बात करें
+  const sendText = () => { const v = $("txt").value; $("txt").value = ""; handle(v); };
+  $("send").onclick = sendText;
+  $("txt").addEventListener("keydown", (e) => { if (e.key === "Enter") sendText(); });
+
+  const FIELDS = ["geminiKey", "geminiModel", "elevenKey", "elevenVoice"];
+  $("gear").onclick = () => {
+    FIELDS.forEach((f) => ($(f).value = store.get(f)));
+    $("alwaysOffline").checked = store.get("alwaysOffline") === "1";
+    $("settings").hidden = false;
+  };
+  $("close").onclick = () => ($("settings").hidden = true);
+  $("save").onclick = () => {
+    FIELDS.forEach((f) => store.set(f, $(f).value.trim()));
+    store.set("alwaysOffline", $("alwaysOffline").checked ? "1" : "0");
+    store.set("offlineUntil", "0");
+    $("settings").hidden = true;
+    addMsg("siya", "सेव हो गया boss।");
+  };
+
+  if ("speechSynthesis" in window) window.speechSynthesis.getVoices();
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+  addMsg("siya", "Yes boss! मैं सिया हूँ। माइक दबाइए या लिखकर पूछिए।");
+})();

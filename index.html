@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0a0a0a">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg">
+<title>Siya</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div class="brand">SIYA</div>
+  <div id="status">तैयार</div>
+  <button id="gear" aria-label="सेटिंग">⚙</button>
+</header>
+
+<main>
+  <div id="orb" class="orb idle"><div class="ring r1"></div><div class="ring r2"></div><div class="core"></div></div>
+  <div class="tap">गोले को दबाकर सीधा बात कीजिए</div>
+  <div id="log"></div>
+</main>
+
+<footer>
+  <input id="txt" placeholder="यहाँ लिखिए या माइक दबाइए..." autocomplete="off">
+  <button id="send" aria-label="भेजो">➤</button>
+  <button id="mic" aria-label="माइक">🎤</button>
+</footer>
+
+<section id="settings" hidden>
+  <div class="panel">
+    <h2>सेटिंग</h2>
+    <p class="hint">ये सब सिर्फ़ आपके फ़ोन में सेव होता है, कहीं अपलोड नहीं होता।</p>
+
+    <label>Gemini API key (लाइव इंटरनेट जवाब के लिए)</label>
+    <input id="geminiKey" type="password" placeholder="AIza...">
+    <label>Gemini मॉडल</label>
+    <input id="geminiModel" placeholder="gemini-2.0-flash">
+
+    <label>ElevenLabs API key (अच्छी आवाज़, ज़रूरी नहीं)</label>
+    <input id="elevenKey" type="password" placeholder="खाली छोड़ेंगे तो फ़ोन की आवाज़ चलेगी">
+    <label>ElevenLabs Voice ID</label>
+    <input id="elevenVoice" placeholder="voice id">
+
+    <label class="chk"><input id="alwaysOffline" type="checkbox"> हमेशा फ़ोन की आवाज़ (unlimited)</label>
+
+    <div class="row">
+      <button id="save">सेव करो</button>
+      <button id="close" class="ghost">बंद करो</button>
+    </div>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
