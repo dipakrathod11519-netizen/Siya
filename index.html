@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg">
 <title>Siya</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 <header>
@@ -18,22 +18,20 @@
 
 <main>
   <div id="orb" class="orb idle"><div class="ring r1"></div><div class="ring r2"></div><div class="core"></div></div>
-  <div class="tap">गोले को दबाकर सीधा बात कीजिए</div>
+  <div class="tap">मैं अपने-आप सुनती रहूँगी। गोला दबाने पर म्यूट / चालू</div>
   <div id="log"></div>
 </main>
 
 <div id="modes">
   <button id="studyBtn" class="chip">📚 Study mode</button>
-  <button class="chip mood on" data-mood="normal">सामान्य</button>
-  <button class="chip mood" data-mood="sad">😢 दुखी</button>
-  <button class="chip mood" data-mood="love">💕 प्यार</button>
-  <button class="chip mood" data-mood="angry">😡 गुस्सा</button>
 </div>
 
 <footer>
-  <input id="txt" placeholder="यहाँ लिखिए या माइक दबाइए..." autocomplete="off">
+  <input id="txt" placeholder="यहाँ लिखिए या बस बोलिए..." autocomplete="off">
+  <button id="cam" aria-label="फ़ोटो">📷</button>
   <button id="send" aria-label="भेजो">➤</button>
   <button id="mic" aria-label="माइक">🎤</button>
+  <input id="photo" type="file" accept="image/*" hidden>
 </footer>
 
 <section id="settings" hidden>
@@ -41,18 +39,30 @@
     <h2>सेटिंग</h2>
     <p class="hint">ये सब सिर्फ़ आपके फ़ोन में सेव होता है, कहीं अपलोड नहीं होता।</p>
 
-    <label>Gemini API key (लाइव इंटरनेट जवाब के लिए)</label>
+    <label>Gemini API key (जवाब, फ़ोटो और आवाज़ के लिए)</label>
     <input id="geminiKey" type="password" placeholder="AIza...">
-    <label>Gemini मॉडल</label>
-    <input id="geminiModel" placeholder="खाली छोड़ दीजिए (अपने आप चुनेगी)">
+    <label>Gemini मॉडल (खाली छोड़ दीजिए)</label>
+    <input id="geminiModel" placeholder="अपने आप चुनेगी">
 
-    <label>ElevenLabs API key (अच्छी आवाज़, ज़रूरी नहीं)</label>
-    <input id="elevenKey" type="password" placeholder="खाली छोड़ेंगे तो फ़ोन की आवाज़ चलेगी">
-    <label>ElevenLabs Voice ID</label>
-    <input id="elevenVoice" placeholder="voice id">
+    <label>Siya की आवाज़ (Google की अच्छी आवाज़)</label>
+    <select id="ttsVoice">
+      <option value="Leda">Leda (जवान लड़की)</option>
+      <option value="Kore">Kore (मज़बूत)</option>
+      <option value="Aoede">Aoede (हल्की)</option>
+      <option value="Zephyr">Zephyr (चमकदार)</option>
+      <option value="Sulafat">Sulafat (गर्म)</option>
+      <option value="Autonoe">Autonoe (नरम)</option>
+    </select>
+    <label class="chk"><input id="geminiVoiceOn" type="checkbox"> Google की अच्छी आवाज़ इस्तेमाल करो</label>
+    <label class="chk"><input id="proactiveOn" type="checkbox"> Siya खुद बात शुरू करे और सुझाव दे</label>
 
     <label>स्टडी मोड की भाषा</label>
     <select id="studyLang"><option value="हिंदी">हिंदी</option><option value="मराठी">मराठी</option><option value="English">English</option></select>
+
+    <label>ElevenLabs API key (ज़रूरी नहीं)</label>
+    <input id="elevenKey" type="password" placeholder="खाली छोड़ सकते हैं">
+    <label>ElevenLabs Voice ID</label>
+    <input id="elevenVoice" placeholder="voice id">
 
     <label class="chk"><input id="alwaysOffline" type="checkbox"> हमेशा फ़ोन की आवाज़ (unlimited)</label>
 
@@ -63,6 +73,6 @@
   </div>
 </section>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

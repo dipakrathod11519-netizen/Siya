@@ -52,3 +52,7 @@ body[data-mood="angry"] .core{animation:pulse .7s ease-in-out infinite}
 #studyBtn{border-color:#8a6a1a}
 #studyBtn.on{background:#6b4e0c;border-color:#ffc83d;box-shadow:0 0 10px #ffc83d}
 .panel select{width:100%;background:var(--panel);border:1px solid #3a1a1a;color:var(--txt);border-radius:10px;padding:11px;font-size:14px}
+
+.msg img{max-width:100%;max-height:220px;border-radius:10px;display:block}
+footer{gap:6px}
+footer button{width:42px;height:42px;font-size:17px}
