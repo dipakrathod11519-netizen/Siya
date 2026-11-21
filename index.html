@@ -7,18 +7,64 @@
 <link rel="manifest" href="manifest.json">
 <link rel="icon" href="icon.svg">
 <title>Siya</title>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
+<div id="boot"><div id="bootLines"></div><div class="bootHint">छूकर छोड़ें</div></div>
+
 <header>
   <div class="brand">SIYA</div>
   <div id="status">तैयार</div>
   <button id="gear" aria-label="सेटिंग">⚙</button>
 </header>
 
+<div id="hud">
+  <div class="hc"><b id="hTime">--:--</b><span id="hDate">--</span></div>
+  <div class="hc"><b id="hBat">--</b><span>बैटरी</span></div>
+  <div class="hc"><b id="hNet">--</b><span>नेटवर्क</span></div>
+  <div class="hc"><b id="hMood">सामान्य</b><span>मूड</span></div>
+</div>
+
 <main>
-  <div id="orb" class="orb idle"><div class="ring r1"></div><div class="ring r2"></div><div class="core"></div></div>
-  <div class="tap">मैं अपने-आप सुनती रहूँगी। गोला दबाने पर म्यूट / चालू</div>
+  <div id="orb" class="orb idle"><div class="ring r1"></div><div class="ring r2"></div>
+  <div class="avatar"><svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-label="Siya">
+    <defs><radialGradient id="bgG" cx="50%" cy="38%" r="75%"><stop offset="0" stop-color="#3a1010"/><stop offset="1" stop-color="#090404"/></radialGradient></defs>
+    <rect width="200" height="200" fill="url(#bgG)"/>
+    <path class="shirt" d="M26 204 C32 170 66 158 100 158 C134 158 168 170 174 204Z"/>
+    <g class="head">
+      <path class="hair" d="M38 112 C30 40 70 14 100 14 C130 14 170 40 162 112 C160 150 152 178 142 198 L58 198 C48 178 40 150 38 112Z"/>
+      <rect x="88" y="138" width="24" height="26" rx="9" fill="#f1c2a5"/>
+      <ellipse cx="100" cy="98" rx="42" ry="50" fill="#ffdcc6"/>
+      <path class="hair" d="M54 100 C46 52 72 30 100 30 C128 30 154 52 146 100 C142 80 134 66 122 62 C116 76 104 80 96 66 C88 78 76 74 70 62 C62 70 56 84 54 100Z"/>
+      <path class="hair" d="M54 100 C48 130 54 158 64 182 C58 152 60 126 66 104Z"/>
+      <path class="hair" d="M146 100 C152 130 146 158 136 182 C142 152 140 126 134 104Z"/>
+      <ellipse class="blush" cx="68" cy="124" rx="9" ry="5"/><ellipse class="blush" cx="132" cy="124" rx="9" ry="5"/>
+      <g class="eye el">
+        <ellipse cx="80" cy="104" rx="10" ry="12" fill="#fff"/>
+        <g class="pupil"><ellipse class="iris" cx="80" cy="106" rx="7" ry="9"/><ellipse cx="80" cy="106" rx="3.5" ry="5" fill="#120a14"/><circle cx="83" cy="101" r="2.6" fill="#fff"/></g>
+        <path d="M69 99 C74 91 86 91 91 99" stroke="#120a14" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+      </g>
+      <g class="eye er">
+        <ellipse cx="120" cy="104" rx="10" ry="12" fill="#fff"/>
+        <g class="pupil"><ellipse class="iris" cx="120" cy="106" rx="7" ry="9"/><ellipse cx="120" cy="106" rx="3.5" ry="5" fill="#120a14"/><circle cx="123" cy="101" r="2.6" fill="#fff"/></g>
+        <path d="M109 99 C114 91 126 91 131 99" stroke="#120a14" stroke-width="2.8" fill="none" stroke-linecap="round"/>
+      </g>
+      <path class="brow bl" d="M68 88 C74 84 86 84 92 87"/>
+      <path class="brow br" d="M108 87 C114 84 126 84 132 88"/>
+      <path d="M99 117 q1 4 3 4" stroke="#d9a58a" fill="none" stroke-width="1.6" stroke-linecap="round"/>
+      <g class="mouth">
+        <path class="m-normal" d="M90 134 Q100 144 110 134 Q100 139 90 134Z"/>
+        <path class="m-sad" d="M91 141 Q100 132 109 141 Q100 137 91 141Z"/>
+        <path class="m-love" d="M89 133 Q100 150 111 133 Q100 138 89 133Z"/>
+        <path class="m-angry" d="M90 138 L96 134 L104 139 L110 135" fill="none"/>
+      </g>
+      <path class="tear" d="M68 116 q-4 8 0 12 q4 -4 0 -12z"/>
+      <g class="hearts"><path transform="translate(146 62)" d="M0 0 c-3 -4 -9 0 -5 5 l5 5 l5 -5 c4 -5 -2 -9 -5 -5z"/><path transform="translate(156 84) scale(.7)" d="M0 0 c-3 -4 -9 0 -5 5 l5 5 l5 -5 c4 -5 -2 -9 -5 -5z"/></g>
+      <g class="vein"><path d="M136 62 l7 -4 M138 69 l9 1 M136 76 l7 5"/></g>
+    </g>
+  </svg></div></div>
+  <div id="wave"></div>
+  <div class="tap">"सिया" बोलकर बुलाइए। गोला दबाने पर म्यूट / चालू</div>
   <div id="log"></div>
 </main>
 
@@ -30,7 +76,6 @@
   <input id="txt" placeholder="यहाँ लिखिए या बस बोलिए..." autocomplete="off">
   <button id="cam" aria-label="फ़ोटो">📷</button>
   <button id="send" aria-label="भेजो">➤</button>
-  <button id="mic" aria-label="माइक">🎤</button>
   <input id="photo" type="file" accept="image/*" hidden>
 </footer>
 
@@ -55,6 +100,7 @@
     </select>
     <label class="chk"><input id="geminiVoiceOn" type="checkbox"> Google की अच्छी आवाज़ इस्तेमाल करो</label>
     <label class="chk"><input id="proactiveOn" type="checkbox"> Siya खुद बात शुरू करे और सुझाव दे</label>
+    <label class="chk"><input id="wakeOnly" type="checkbox"> सिर्फ़ "सिया" बोलने पर जागे (आसपास की आवाज़ अनदेखी)</label>
 
     <label>स्टडी मोड की भाषा</label>
     <select id="studyLang"><option value="हिंदी">हिंदी</option><option value="मराठी">मराठी</option><option value="English">English</option></select>
@@ -73,6 +119,6 @@
   </div>
 </section>
 
-<script src="app.js?v=8"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

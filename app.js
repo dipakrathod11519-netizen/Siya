@@ -5,6 +5,8 @@
     set: (k, v) => { try { localStorage.setItem("siya_" + k, v); } catch (e) {} },
   };
   const flag = (k, d) => { const v = store.get(k); return v === "" ? d : v === "1"; };
+  const load = (k) => { try { const v = JSON.parse(store.get(k) || "[]"); return Array.isArray(v) ? v : []; } catch (e) { return []; } };
+  const save = (k, v) => store.set(k, JSON.stringify(v));
 
   // ---------- मूड (बातों से अपने-आप बदलता है) और स्टडी मोड ----------
   const MOODS = {
@@ -38,6 +40,8 @@
       "बात सामान्य हो जाए तो धीरे-धीरे normal पर लौट आओ। सवाल का जवाब हर मूड में सही देना। " +
       "यूज़र फ़ोटो भेजे तो उसे ध्यान से देखकर जवाब दो। " +
       "जवाब का फ़ॉर्मेट: पहली लाइन में सिर्फ़ मूड का टैग: [normal] या [sad] या [love] या [angry]। फिर नई लाइन से असली जवाब।";
+    const mem = load("mem");
+    if (mem.length) p += " boss के बारे में तुम्हें ये बातें याद हैं (ज़रूरत पड़े तभी इस्तेमाल करो): " + mem.join("; ") + "।";
     return p;
   }
 
@@ -46,6 +50,7 @@
   const LIVE = /(आज|अभी|ताज़ा|ताजा|न्यूज़|न्यूज|खबर|ख़बर|समाचार|मौसम|भाव|कीमत|रेट|स्कोर|मैच|रिज़ल्ट|रिजल्ट|नतीजा|latest|news|today|price|score|weather|live|current|कौन है|कब है|कितना है)/i;
 
   const WAKE = /(सिया|सीया|सिआ|siya|sia|seeya|siyaa)/gi;
+  const WAKE1 = /(सिया|सीया|सिआ|siya|sia|seeya|siyaa)/i;
   const PHONEPE = /(phonepe|phone pe|फोनपे|फ़ोनपे|फोन पे)/i;
   const APPS = [
     { name: "WhatsApp", pkg: "com.whatsapp", re: /(whatsapp|व्हाट्सएप|वाट्सएप|व्हाट्सऐप|वॉट्सऐप)/i },
@@ -156,7 +161,7 @@
     w(36, "data"); v.setUint32(40, bytes.length, true);
     return new Blob([h, bytes], { type: "audio/wav" });
   }
-  async function speakGemini(text) {
+  async function ttsBlob(text) {
     const key = store.get("geminiKey");
     const voice = store.get("ttsVoice") || "Leda";
     let lastErr = null;
@@ -184,10 +189,23 @@
       const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
       const p = parts.find((x) => x.inlineData && x.inlineData.data);
       if (!p) { lastErr = new Error("no audio"); lastErr.status = 0; continue; }
-      await playBlob(toWavBlob(b64ToBytes(p.inlineData.data)));
-      return;
+      return toWavBlob(b64ToBytes(p.inlineData.data));
     }
     throw lastErr || new Error("tts");
+  }
+  // सारे वाक्यों की आवाज़ एक साथ बनवाते हैं, पहला बनते ही बजना शुरू
+  async function speakGemini(text) {
+    const chunks = [];
+    for (const sn of text.split(/(?<=[।.!?])\s+/).filter(Boolean)) {
+      if (chunks.length && chunks[chunks.length - 1].length < 18) chunks[chunks.length - 1] += " " + sn;
+      else chunks.push(sn);
+    }
+    const jobs = chunks.map((c) => ttsBlob(c).then((blob) => ({ blob }), (err) => ({ err })));
+    for (let i = 0; i < jobs.length; i++) {
+      const r = await jobs[i];
+      if (r.err) { if (i === 0) throw r.err; await speakOffline(chunks[i]); continue; }
+      await playBlob(r.blob);
+    }
   }
   async function speakEleven(text) {
     const res = await fetch("https://api.elevenlabs.io/v1/text-to-speech/" + encodeURIComponent(store.get("elevenVoice")), {
@@ -201,7 +219,7 @@
   const blockedUntil = (k) => Number(store.get(k, "0")) > Date.now();
 
   async function siyaSpeak(raw) {
-    const text = shorten(cleanForSpeech(raw), study ? 6 : 3);
+    const text = shorten(cleanForSpeech(raw), study ? 5 : 2);
     if (!text) return;
     speaking = true;
     try { if (rec && recRunning) rec.abort(); } catch (e) {}
@@ -230,9 +248,10 @@
   }
 
   // ---------- AI से जवाब ----------
-  function callGemini(model, key, withTools) {
+  function callGemini(model, key, withTools, withThink) {
     const body = { system_instruction: { parts: [{ text: buildPersona() }] }, contents: history };
     if (withTools) body.tools = [{ google_search: {} }];
+    if (withThink) body.generationConfig = { thinkingConfig: { thinkingLevel: "low" } };
     return fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/" + encodeURIComponent(model) + ":generateContent",
       { method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": key }, body: JSON.stringify(body) }
@@ -257,9 +276,15 @@
     let sawLimit = false;
     try {
       for (const model of candidates) {
-        let res = await callGemini(model, key, useSearch);
+        const think = store.get("noThink_" + model) !== "1";
+        let res = await callGemini(model, key, useSearch, think);
+        if (!res.ok && think && res.status === 400) {
+          // इस मॉडल पर "कम सोचो" सेटिंग न चले तो उसके बिना फिर कोशिश
+          const r2 = await callGemini(model, key, useSearch, false);
+          if (r2.ok) { store.set("noThink_" + model, "1"); res = r2; }
+        }
         if (!res.ok && useSearch && [400, 403, 429].includes(res.status)) {
-          const res2 = await callGemini(model, key, false);
+          const res2 = await callGemini(model, key, false, think && store.get("noThink_" + model) !== "1");
           if (res2.ok || res.status === 429) res = res2;
         }
         lastStatus = res.status;
@@ -306,6 +331,35 @@
 
   async function localCommand(s) {
     const d = new Date();
+    // ---- सिस्टम रिपोर्ट ----
+    if (/(सिस्टम रिपोर्ट|स्टेटस|status|बैटरी)/i.test(s) && s.length < 40) {
+      await reply("boss, सिस्टम रिपोर्ट: बैटरी " + (battery ? Math.round(battery.level * 100) + " प्रतिशत" + (battery.charging ? " (चार्ज हो रही है)" : "") : "पता नहीं") +
+        ", इंटरनेट " + netLabel() + ", मूड " + MOOD_HI[mood] + ", " + load("rem").length + " रिमाइंडर बाकी।");
+      return true;
+    }
+    // ---- याददाश्त ----
+    let mm;
+    if (/(क्या याद है|क्या-क्या याद|क्या क्या याद|मेरी यादें)/i.test(s)) {
+      const l = load("mem");
+      await reply(l.length ? "मुझे ये याद है boss: " + l.slice(-5).join("। ") + "।" : "boss, अभी मुझे कुछ याद नहीं है। बोलिए, याद रखो और फिर बात।");
+      return true;
+    }
+    if (/(सब भूल जाओ|सारी यादें|यादें मिटा|सब कुछ भूल)/i.test(s)) { save("mem", []); await reply("ठीक है boss, मैंने सब भुला दिया।"); return true; }
+    if ((mm = s.match(/^(?:याद रखो|याद रख|याद कर लो|याद रखना|remember)\s*(?:कि|that)?\s*(.+)$/i))) {
+      const l = load("mem");
+      l.push(mm[1].slice(0, 200));
+      save("mem", l.slice(-30));
+      await reply("ठीक है boss, याद रख लिया।");
+      return true;
+    }
+    // ---- रिमाइंडर ----
+    if (/रिमाइंडर/.test(s) && /(हटाओ|मिटाओ|डिलीट|clear)/i.test(s)) { save("rem", []); await reply("सारे रिमाइंडर हटा दिए boss।"); return true; }
+    if (/रिमाइंडर/.test(s) && /(लिस्ट|बताओ|कौन|कितने|list)/i.test(s)) {
+      const l = load("rem");
+      await reply(l.length ? "boss, " + l.length + " रिमाइंडर बाकी हैं: " + l.map((r) => fmtTime(r.at) + " पर " + r.text).join("। ") + "।" : "boss, कोई रिमाइंडर बाकी नहीं है।");
+      return true;
+    }
+    if (/(याद दिला|रिमाइंड|remind)/i.test(s)) return await addReminder(s);
     if (/(टाइम|समय|कितने बजे|कितना बजा|time)/i.test(s) && s.length < 30) {
       const h = d.getHours();
       const part = h < 4 ? "रात" : h < 12 ? "सुबह" : h < 16 ? "दोपहर" : h < 20 ? "शाम" : "रात";
@@ -359,6 +413,43 @@
       if (app) { await reply("ठीक है boss, " + app.name + " खोल रही हूँ।"); go("intent://#Intent;package=" + app.pkg + ";end"); return true; }
     }
     return false;
+  }
+
+  // ---------- रिमाइंडर ----------
+  function fmtTime(ts) {
+    const t = new Date(ts);
+    return (t.getHours() % 12 || 12) + " बजकर " + t.getMinutes() + " मिनट";
+  }
+  async function addReminder(s) {
+    const now = Date.now();
+    let at = 0, when = "", cut = "";
+    const rel = s.match(/(\d+)\s*(सेकंड|सेकण्ड|मिनट|घंटे|घंटा|second|sec|minute|min|hour|hr)/i);
+    if (rel) {
+      const n = +rel[1], u = rel[2];
+      const ms = /(सेकंड|सेकण्ड|second|sec)/i.test(u) ? 1000 : /(घंटे|घंटा|hour|hr)/i.test(u) ? 3600000 : 60000;
+      at = now + n * ms; when = n + " " + u + " बाद"; cut = rel[0];
+    } else {
+      const ab = s.match(/(\d{1,2})(?::(\d{2}))?\s*(बजे|baje|am|pm)/i);
+      if (ab) {
+        let h = +ab[1];
+        const mi = +(ab[2] || 0);
+        if (/(शाम|रात|दोपहर|pm)/i.test(s) && h < 12) h += 12;
+        const t = new Date();
+        t.setHours(h, mi, 0, 0);
+        if (/कल/.test(s) || t.getTime() <= now) t.setDate(t.getDate() + 1);
+        at = t.getTime(); when = fmtTime(at) + " पर"; cut = ab[0];
+      }
+    }
+    if (!at) { await reply("boss, कितने मिनट बाद या कितने बजे याद दिलाऊँ? जैसे, 10 मिनट बाद पानी पीने को याद दिलाओ।"); return true; }
+    let text = s.replace(cut, " ")
+      .replace(/(याद दिलाना|याद दिला दो|याद दिलाओ|याद दिलाइए|याद दिला|रिमाइंडर लगाओ|रिमाइंडर|रिमाइंड करो|रिमाइंड|remind me to|remind me|remind)/gi, " ");
+    for (let i = 0; i < 2; i++) text = text.replace(/(^|\s)(मुझे|मुझको|बाद|कि|सुबह|शाम|रात|दोपहर|आज|कल)(?=\s|$)/g, " ");
+    text = text.replace(/\s+/g, " ").trim() || "कुछ ज़रूरी काम";
+    const l = load("rem");
+    l.push({ id: now, at, text });
+    save("rem", l.slice(-20));
+    await reply("ठीक है boss, " + when + " याद दिला दूँगी: " + text + "। (Siya खुली रहनी चाहिए।)");
+    return true;
   }
 
   // ---------- खुद सुझाव देना ----------
@@ -450,15 +541,18 @@
     rec.lang = "hi-IN";
     rec.interimResults = false;
     rec.continuous = false;
-    rec.onstart = () => { recRunning = true; setState("listening", "सुन रही हूँ"); };
+    rec.onstart = () => { recRunning = true; setState("listening", flag("wakeOnly", true) ? "'सिया' बोलकर बुलाइए" : "सुन रही हूँ"); };
     rec.onresult = (e) => {
       const t = e.results[0][0].transcript;
-      if (t && t.trim().length > 1) handle(t);
+      if (!t || t.trim().length < 2) return;
+      // सिर्फ़ "सिया" बोलने पर जागना; जवाब के बाद 25 सेकंड तक बिना नाम के भी सुनती है
+      if (flag("wakeOnly", true) && !WAKE1.test(t) && Date.now() - lastActive > 25000) return;
+      handle(t);
     };
     rec.onerror = (e) => {
       if (e.error === "not-allowed" || e.error === "service-not-allowed") {
         listening = false;
-        $("mic").classList.remove("on");
+        if (document.body.classList) document.body.classList.add("muted");
         if (!unlocked) {
           needGestureListen = true;
           setState("idle", "स्क्रीन पर एक बार छूइए");
@@ -477,13 +571,13 @@
     if (!SR) { addMsg("siya", "boss, इस ब्राउज़र में आवाज़ पहचानना नहीं है। Android के Chrome में खोलिए।"); return; }
     listening = true;
     muted = false;
-    $("mic").classList.add("on");
+    if (document.body.classList) document.body.classList.remove("muted");
     loop();
   }
   function stopListening() {
     listening = false;
     muted = true;
-    $("mic").classList.remove("on");
+    if (document.body.classList) document.body.classList.add("muted");
     try { if (rec) rec.abort(); } catch (e) {}
     setState("idle", "म्यूट। गोला दबाइए");
   }
@@ -511,11 +605,13 @@
     mood = MOODS[m] ? m : "normal";
     store.set("mood", mood);
     document.body.dataset.mood = mood;
+    updateHud();
   }
   function applyStudy(on) {
     study = on;
     store.set("study", on ? "1" : "0");
     $("studyBtn").classList.toggle("on", on);
+    updateHud();
   }
   $("studyBtn").onclick = () => {
     applyStudy(!study);
@@ -561,14 +657,13 @@
     }
   };
 
-  $("mic").onclick = toggleMic;
   $("orb").onclick = toggleMic;
   const sendText = () => { const v = $("txt").value; $("txt").value = ""; handle(v); };
   $("send").onclick = sendText;
   $("txt").addEventListener("keydown", (e) => { if (e.key === "Enter") sendText(); });
 
   const FIELDS = ["geminiKey", "geminiModel", "elevenKey", "elevenVoice", "studyLang", "ttsVoice"];
-  const CHECKS = [["alwaysOffline", false], ["geminiVoiceOn", true], ["proactiveOn", true]];
+  const CHECKS = [["alwaysOffline", false], ["geminiVoiceOn", true], ["proactiveOn", true], ["wakeOnly", true]];
   $("gear").onclick = () => {
     FIELDS.forEach((f) => ($(f).value = store.get(f) || (f === "studyLang" ? "हिंदी" : f === "ttsVoice" ? "Leda" : "")));
     CHECKS.forEach(([k, d]) => ($(k).checked = flag(k, d)));
@@ -601,6 +696,65 @@
     suggest();
   }, 3000);
 
+  // ---------- साइ-फ़ाई डैशबोर्ड ----------
+  const MOOD_HI = { normal: "सामान्य", sad: "दुखी", love: "प्यार", angry: "गुस्सा" };
+  let battery = null;
+  function netLabel() {
+    if (navigator.onLine === false) return "OFFLINE";
+    const c = navigator.connection;
+    return c && c.effectiveType ? c.effectiveType.toUpperCase() : "ONLINE";
+  }
+  function updateHud() {
+    if (!$("hTime")) return;
+    const d = new Date();
+    $("hTime").textContent = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    $("hDate").textContent = d.getDate() + " " + MONTHS[d.getMonth()];
+    $("hBat").textContent = battery ? Math.round(battery.level * 100) + "%" + (battery.charging ? " ⚡" : "") : "--";
+    $("hNet").textContent = netLabel();
+    $("hMood").textContent = (study ? "📚 " : "") + MOOD_HI[mood];
+  }
+  if (navigator.getBattery) navigator.getBattery().then((b) => { battery = b; updateHud(); }).catch(() => {});
+  setInterval(updateHud, 1000);
+  const wv = $("wave");
+  if (wv) for (let i = 0; i < 28; i++) {
+    const b = document.createElement("i");
+    b.style.animationDelay = (-Math.random()).toFixed(2) + "s";
+    b.style.height = Math.round(20 + Math.random() * 80) + "%";
+    wv.appendChild(b);
+  }
+  function boot() {
+    const el = $("boot");
+    const box = $("bootLines");
+    if (!el || !box) return;
+    const lines = ["SIYA OS v3.0", "> आवाज़ मॉड्यूल .......... OK", "> मूड इंजन .......... OK",
+      "> याददाश्त .......... " + load("mem").length + " बातें", "> इंटरनेट .......... " + netLabel(), "SIYA ONLINE"];
+    lines.forEach((t, i) => setTimeout(() => { const p = document.createElement("div"); p.textContent = t; box.appendChild(p); }, i * 300));
+    setTimeout(() => el.classList.add("off"), lines.length * 300 + 500);
+    el.onclick = () => el.classList.add("off");
+  }
+
+  // रिमाइंडर का समय आने पर बोलना
+  setInterval(() => {
+    if (speaking || busy || pendingSpeak) return;
+    const l = load("rem");
+    const r = l.find((x) => x.at <= Date.now());
+    if (!r) return;
+    save("rem", l.filter((x) => x.id !== r.id));
+    const late = Date.now() - r.at > 90000;
+    try { if (navigator.vibrate) navigator.vibrate([300, 150, 300]); } catch (e) {}
+    reply((late ? "boss, ये रिमाइंडर छूट गया था: " : "boss, याद दिला रही हूँ: ") + r.text).then(resumeListening);
+  }, 4000);
+
+  function morningBrief() {
+    const d = new Date();
+    const h = d.getHours();
+    const key = d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate();
+    if (h < 5 || h >= 12 || store.get("lastBrief") === key) return "";
+    store.set("lastBrief", key);
+    const n = load("rem").length;
+    return "आज " + DAYS[d.getDay()] + ", " + d.getDate() + " " + MONTHS[d.getMonth()] + " है।" + (n ? " आपके " + n + " रिमाइंडर बाकी हैं।" : "");
+  }
+
   function greeting() {
     const h = new Date().getHours();
     if (h >= 5 && h < 12) return "सुप्रभात boss! मैं तैयार हूँ। बताइए, आज क्या करना है?";
@@ -613,7 +767,9 @@
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
   applyMood(mood);
   applyStudy(study);
-  const hello = greeting();
+  const brief = morningBrief();
+  const hello = brief ? "सुप्रभात boss! " + brief : greeting();
+  boot();
   addMsg("siya", hello);
   startListening();
   siyaSpeak(hello).then(() => { touch(); resumeListening(); });
